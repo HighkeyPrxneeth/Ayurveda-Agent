@@ -1,0 +1,313 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 23, 23, 23;
+  --background-rgb: 255, 255, 255;
+}
+
+.dark {
+  --foreground-rgb: 229, 231, 235;
+  --background-rgb: 17, 24, 39;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+  font-feature-settings: 'rlig' 1, 'calt' 1;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Dosha bar animations */
+@keyframes dosha-fill {
+  from {
+    width: 0%;
+  }
+  to {
+    width: var(--dosha-width);
+  }
+}
+
+.dosha-bar-animated {
+  animation: dosha-fill 1s ease-out forwards;
+}
+
+/* Subtle QoL animations */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.35s ease-out both;
+}
+
+/* Focus styles */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ayurveda-gold;
+}
+
+/* Custom scrollbar for overflow areas */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5);
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.7);
+}
+
+.dark .scrollbar-thin {
+  scrollbar-color: rgba(75, 85, 99, 0.5) transparent;
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(75, 85, 99, 0.5);
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(75, 85, 99, 0.7);
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .dosha-bar-animated {
+    animation: none;
+  }
+  
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  body {
+    background: white !important;
+    color: black !important;
+  }
+}
+
+/* Enhanced Markdown Styles */
+.chat-markdown {
+  @apply text-[0.9375rem] leading-relaxed;
+}
+
+.chat-markdown p {
+  @apply my-2.5 leading-[1.7];
+}
+
+.chat-markdown p:first-child {
+  @apply mt-0;
+}
+
+.chat-markdown p:last-child {
+  @apply mb-0;
+}
+
+/* Headings */
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4 {
+  @apply font-semibold mt-5 mb-2.5 leading-tight;
+}
+
+.chat-markdown h1 {
+  @apply text-xl;
+}
+
+.chat-markdown h2 {
+  @apply text-lg;
+}
+
+.chat-markdown h3 {
+  @apply text-base font-semibold;
+}
+
+/* Bold titles (like ** 🎯 Title **) */
+.chat-markdown strong {
+  @apply font-semibold;
+}
+
+.chat-markdown p > strong:first-child:last-child,
+.chat-markdown p > strong:first-child {
+  @apply text-[0.95rem] block mt-4 mb-1.5;
+}
+
+.chat-markdown p:first-child > strong:first-child {
+  @apply mt-0;
+}
+
+/* Lists */
+.chat-markdown ul,
+.chat-markdown ol {
+  @apply my-3 pl-5 space-y-1.5;
+}
+
+.chat-markdown ul {
+  @apply list-disc;
+}
+
+.chat-markdown ol {
+  @apply list-decimal;
+}
+
+.chat-markdown li {
+  @apply leading-[1.65] pl-1;
+}
+
+.chat-markdown li::marker {
+  @apply text-amber-600;
+}
+
+.dark .chat-markdown li::marker {
+  @apply text-amber-400;
+}
+
+.chat-markdown li > ul,
+.chat-markdown li > ol {
+  @apply mt-1.5 mb-0;
+}
+
+/* Inline code */
+.chat-markdown code:not(pre code) {
+  @apply px-1.5 py-0.5 rounded-md text-[0.85em] font-medium;
+  @apply bg-amber-50 text-amber-800 border border-amber-200/50;
+}
+
+.dark .chat-markdown code:not(pre code) {
+  @apply bg-amber-900/20 text-amber-300 border-amber-700/30;
+}
+
+/* Code blocks */
+.chat-markdown pre {
+  @apply my-4 p-4 rounded-xl overflow-x-auto text-sm leading-relaxed;
+  @apply bg-gray-900 text-gray-100;
+}
+
+.dark .chat-markdown pre {
+  @apply bg-gray-950;
+}
+
+.chat-markdown pre code {
+  @apply bg-transparent p-0 text-inherit border-none;
+}
+
+/* Blockquotes */
+.chat-markdown blockquote {
+  @apply my-4 pl-4 border-l-4 border-amber-400 italic;
+  @apply text-gray-600 bg-amber-50/50 py-2 pr-4 rounded-r-lg;
+}
+
+.dark .chat-markdown blockquote {
+  @apply text-gray-300 bg-amber-900/10 border-amber-500;
+}
+
+/* Horizontal rules */
+.chat-markdown hr {
+  @apply my-5 border-t-2 border-dashed border-gray-200;
+}
+
+.dark .chat-markdown hr {
+  @apply border-gray-700;
+}
+
+/* Links */
+.chat-markdown a {
+  @apply text-amber-600 hover:text-amber-700 underline underline-offset-2 decoration-amber-300;
+  @apply transition-colors duration-150;
+}
+
+.dark .chat-markdown a {
+  @apply text-amber-400 hover:text-amber-300 decoration-amber-600;
+}
+
+/* Tables */
+.chat-markdown table {
+  @apply w-full my-4 text-sm border-collapse;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  @apply px-3 py-2 border border-gray-200 text-left;
+}
+
+.dark .chat-markdown th,
+.dark .chat-markdown td {
+  @apply border-gray-700;
+}
+
+.chat-markdown th {
+  @apply bg-gray-50 font-semibold;
+}
+
+.dark .chat-markdown th {
+  @apply bg-gray-800;
+}
+
+.chat-markdown tr:nth-child(even) td {
+  @apply bg-gray-50/50;
+}
+
+.dark .chat-markdown tr:nth-child(even) td {
+  @apply bg-gray-800/50;
+}
+
+/* User message markdown overrides */
+.chat-markdown-user {
+  @apply text-white;
+}
+
+.chat-markdown-user strong {
+  @apply text-white;
+}
+
+.chat-markdown-user li::marker {
+  @apply text-white/70;
+}
+
+.chat-markdown-user a {
+  @apply text-white underline decoration-white/50 hover:decoration-white;
+}
+
+.chat-markdown-user code:not(pre code) {
+  @apply bg-white/20 text-white border-white/30;
+}
+
+.chat-markdown-user blockquote {
+  @apply border-white/50 text-white/90 bg-white/10;
+}
+
+/* Section styling for diet recommendations etc */
+.chat-markdown strong + br + br,
+.chat-markdown p:has(> strong:only-child) + ul {
+  @apply mt-1;
+}
