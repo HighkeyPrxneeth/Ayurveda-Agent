@@ -94,12 +94,19 @@ class TreatmentResponse(BaseModel):
 
 # === NEW: Chat Interface Models (Clinical Council) ===
 
+class ConversationMessage(BaseModel):
+    """A single message in the conversation history."""
+    role: str = Field(..., description="Message role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message content")
+
+
 class ChatRequest(BaseModel):
     """Input for the chat interface using the Clinical Council."""
     message: str = Field(..., min_length=1, description="User's message")
     user_id: Optional[str] = Field(None, description="User identifier for context tracking")
     dosha_scores: Optional[dict[str, float]] = Field(None, description="Known Dosha scores")
     health_conditions: list[str] = Field(default_factory=list, description="Known conditions")
+    conversation_history: list[ConversationMessage] = Field(default_factory=list, description="Previous conversation messages")
 
 
 class ChatResponse(BaseModel):
@@ -279,12 +286,22 @@ async def chat(request: ChatRequest):
         "kapha": 0.34
     }
     
+    # Convert conversation history to LangChain messages
+    from langchain_core.messages import HumanMessage, AIMessage
+    messages = []
+    for msg in request.conversation_history:
+        if msg.role == 'user':
+            messages.append(HumanMessage(content=msg.content))
+        elif msg.role == 'assistant':
+            messages.append(AIMessage(content=msg.content))
+    
     try:
         result = await process_query(
             user_id=user_id,
             query=request.message,
             dosha_profile=dosha_profile,
-            health_conditions=request.health_conditions
+            health_conditions=request.health_conditions,
+            messages=messages
         )
         
         return ChatResponse(
@@ -338,6 +355,15 @@ async def chat_stream(request: ChatRequest):
     async def progress_callback(stage: str, detail: Optional[str] = None):
         await queue.put({"event": "status", "data": {"stage": stage, "detail": detail}})
 
+    # Convert conversation history to LangChain messages
+    from langchain_core.messages import HumanMessage, AIMessage
+    messages = []
+    for msg in request.conversation_history:
+        if msg.role == 'user':
+            messages.append(HumanMessage(content=msg.content))
+        elif msg.role == 'assistant':
+            messages.append(AIMessage(content=msg.content))
+
     async def run_pipeline():
         try:
             result = await process_query(
@@ -345,6 +371,7 @@ async def chat_stream(request: ChatRequest):
                 query=request.message,
                 dosha_profile=dosha_profile,
                 health_conditions=request.health_conditions,
+                messages=messages,
                 progress_callback=progress_callback
             )
 

@@ -54,11 +54,17 @@ export interface TreatmentResponse {
   disclaimer: string;
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface ChatRequest {
   message: string;
   user_id?: string;
   dosha_scores?: Record<string, number>;
   health_conditions?: string[];
+  conversation_history?: ChatMessage[];
 }
 
 export interface ChatResponse {

@@ -94,7 +94,7 @@ Do NOT:
 """
 
 
-async def fast_responder(query: str) -> str:
+async def fast_responder(query: str, messages: list[BaseMessage] = None) -> str:
     """
     Handle simple queries with a fast, lightweight response.
     
@@ -103,8 +103,19 @@ async def fast_responder(query: str) -> str:
     logger.info("Fast responder invoked")
     llm = get_fast_llm()
     
+    # Build conversation context
+    conversation_context = ""
+    if messages:
+        recent_messages = messages[-6:]  # Last 3 exchanges
+        history_parts = []
+        for msg in recent_messages:
+            role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+            history_parts.append(f"{role}: {msg.content[:200]}")
+        if history_parts:
+            conversation_context = "\n\nRecent conversation:\n" + "\n".join(history_parts)
+    
     prompt = ChatPromptTemplate.from_messages([
-        ("system", FAST_RESPONDER_SYSTEM),
+        ("system", FAST_RESPONDER_SYSTEM + conversation_context),
         ("human", "{query}")
     ])
     
@@ -129,7 +140,10 @@ CURRENT USER'S PROFILE:
 - Dosha Scores: {dosha_profile}
 - Known Health Conditions: {health_conditions}
 
-CONTEXT FROM PREVIOUS CONVERSATIONS:
+CONVERSATION HISTORY:
+{conversation_history}
+
+CONTEXT FROM PREVIOUS SESSIONS:
 {context_from_graph}
 
 GUIDELINES:
@@ -138,6 +152,7 @@ GUIDELINES:
 3. Explain the "why" behind recommendations using Dosha theory
 4. If vitals are provided, interpret them through the lens of current Vikriti
 5. Never claim to diagnose diseases - frame as "imbalance patterns"
+6. Reference earlier parts of the conversation when relevant
 
 Response format:
 - Start with a brief acknowledgment of their profile
@@ -175,7 +190,19 @@ class AyurvedaSpecialist:
         """
         logger.info("AyurvedaSpecialist processing started")
         # Build context string
-        context = state.get("context_from_graph") or "No previous conversation history."
+        context = state.get("context_from_graph") or "No previous session history."
+        
+        # Build conversation history
+        messages = state.get("messages", [])
+        conversation_history = "No prior messages in this conversation."
+        if messages:
+            history_parts = []
+            for msg in messages[-10:]:  # Last 5 exchanges
+                role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+                content = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
+                history_parts.append(f"{role}: {content}")
+            if history_parts:
+                conversation_history = "\n".join(history_parts)
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", AYURVEDA_SPECIALIST_SYSTEM),
@@ -193,6 +220,7 @@ class AyurvedaSpecialist:
                 "dosha_profile": state.get("dosha_profile", {}),
                 "health_conditions": state.get("health_conditions", []),
                 "context_from_graph": context,
+                "conversation_history": conversation_history,
                 "query": state["user_query"]
             })
             
@@ -244,12 +272,16 @@ USER'S PROFILE:
 - Known Health Conditions: {health_conditions}
 - Dosha Profile: {dosha_profile}
 
+CONVERSATION HISTORY:
+{conversation_history}
+
 STRICT SAFETY RULES:
 1. ALWAYS check contraindications before recommending ANY herb
 2. If in doubt, recommend consulting a practitioner
 3. Never recommend herbs during pregnancy without explicit safety data
 4. Flag any potential interaction with common medications
 5. Cite sources for contraindication data (Bhavaprakasha, API guidelines)
+6. Reference earlier parts of the conversation when relevant
 
 FOR EACH HERB MENTIONED:
 - State its primary actions (Rasa, Guna, Virya, Vipaka)
@@ -280,6 +312,19 @@ class PharmacistAgent:
         Always errs on the side of caution.
         """
         logger.info("PharmacistAgent processing started")
+        
+        # Build conversation history
+        messages = state.get("messages", [])
+        conversation_history = "No prior messages in this conversation."
+        if messages:
+            history_parts = []
+            for msg in messages[-10:]:
+                role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+                content = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
+                history_parts.append(f"{role}: {content}")
+            if history_parts:
+                conversation_history = "\n".join(history_parts)
+        
         prompt = ChatPromptTemplate.from_messages([
             ("system", PHARMACIST_SYSTEM),
             ("human", "{query}")
@@ -293,6 +338,7 @@ class PharmacistAgent:
             response = await chain.ainvoke({
                 "dosha_profile": state.get("dosha_profile", {}),
                 "health_conditions": state.get("health_conditions", []),
+                "conversation_history": conversation_history,
                 "query": state["user_query"]
             })
             
@@ -349,6 +395,9 @@ USER PROFILE:
 - Prakriti (Constitution): {dosha_profile}
 - Known Conditions: {health_conditions}
 
+CONVERSATION HISTORY:
+{conversation_history}
+
 CONTEXT FROM HISTORY:
 {context_from_graph}
 
@@ -357,6 +406,7 @@ IMPORTANT BOUNDARIES:
 - Always recommend professional consultation for persistent symptoms
 - Frame findings as "This pattern suggests..." not "You have..."
 - Prioritize ruling out serious conditions that need medical attention
+- Reference earlier parts of the conversation when relevant
 
 SYMPTOM ANALYSIS FRAMEWORK:
 1. Which Dosha(s) appear elevated based on these symptoms?
@@ -385,6 +435,18 @@ class DiagnosticsAgent:
         logger.info("DiagnosticsAgent processing started")
         context = state.get("context_from_graph") or "No previous consultation history."
         
+        # Build conversation history
+        messages = state.get("messages", [])
+        conversation_history = "No prior messages in this conversation."
+        if messages:
+            history_parts = []
+            for msg in messages[-10:]:
+                role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+                content = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
+                history_parts.append(f"{role}: {content}")
+            if history_parts:
+                conversation_history = "\n".join(history_parts)
+        
         prompt = ChatPromptTemplate.from_messages([
             ("system", DIAGNOSTICS_SYSTEM),
             ("human", "{query}")
@@ -398,6 +460,7 @@ class DiagnosticsAgent:
                 "dosha_profile": state.get("dosha_profile", {}),
                 "health_conditions": state.get("health_conditions", []),
                 "context_from_graph": context,
+                "conversation_history": conversation_history,
                 "query": state["user_query"]
             })
             
@@ -439,12 +502,16 @@ USER PROFILE:
 - Dosha (Prakriti): {dosha_profile}
 - Health Conditions: {health_conditions}
 
+CONVERSATION HISTORY:
+{conversation_history}
+
 DIETARY PRINCIPLES:
 1. Recommend foods that pacify elevated Doshas
 2. Consider current season in your recommendations
 3. Explain the energetics (Rasa, Virya, Vipaka) of foods
 4. Provide specific, practical meal suggestions
 5. Include lifestyle factors (exercise, sleep) that support digestion
+6. Reference earlier parts of the conversation when relevant
 
 AVOID:
 - Rigid dietary rules without context
@@ -469,6 +536,19 @@ class DietCoach:
         Provide personalized diet and lifestyle recommendations.
         """
         logger.info("DietCoach processing started")
+        
+        # Build conversation history
+        messages = state.get("messages", [])
+        conversation_history = "No prior messages in this conversation."
+        if messages:
+            history_parts = []
+            for msg in messages[-10:]:
+                role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+                content = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
+                history_parts.append(f"{role}: {content}")
+            if history_parts:
+                conversation_history = "\n".join(history_parts)
+        
         prompt = ChatPromptTemplate.from_messages([
             ("system", DIET_COACH_SYSTEM),
             ("human", "{query}")
@@ -482,6 +562,7 @@ class DietCoach:
             response = await chain.ainvoke({
                 "dosha_profile": state.get("dosha_profile", {}),
                 "health_conditions": state.get("health_conditions", []),
+                "conversation_history": conversation_history,
                 "query": state["user_query"]
             })
             

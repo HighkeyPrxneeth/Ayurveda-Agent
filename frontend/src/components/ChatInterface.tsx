@@ -118,10 +118,19 @@ export function ChatInterface({ doshaScores }: ChatInterfaceProps) {
       return next;
     });
 
+    // Build conversation history from messages (exclude the new user message we just added)
+    const conversationHistory = messages
+      .filter(msg => msg.content.trim())
+      .map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content
+      }));
+
     const requestPayload = {
       message: userMessage,
       dosha_scores: doshaScores as Record<string, number> | undefined,
       health_conditions: healthConditions,
+      conversation_history: conversationHistory,
     };
 
     const statusController = new AbortController();

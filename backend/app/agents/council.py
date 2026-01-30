@@ -236,7 +236,7 @@ async def fast_responder_node(state: ClinicalState) -> dict:
     """
     logger.info("fast_responder_node started")
     await emit_progress(state, "fast_responder")
-    response = await fast_responder(state["user_query"])
+    response = await fast_responder(state["user_query"], state.get("messages", []))
     
     return {
         "aggregated_response": response,
