@@ -276,10 +276,11 @@ async def supervisor_node(state: ClinicalState) -> dict:
     logger.info("supervisor_node started")
     await emit_progress(state, "supervisor")
     settings = get_settings()
-    
+
+    model_name = settings.council_supervisor_model or settings.planner_model
     api_key = settings.openai_api_key or ("lm-studio" if settings.openai_base_url else "")
     llm = ChatOpenAI(
-        model=settings.planner_model,
+        model=model_name,
         api_key=api_key,
         base_url=settings.openai_base_url or None,
         temperature=0.2,
@@ -480,9 +481,10 @@ async def aggregator_node(state: ClinicalState) -> dict:
     
     # Multiple outputs - combine them
     settings = get_settings()
+    model_name = settings.council_aggregator_model or settings.executor_model or "gpt-4o-mini"
     api_key = settings.openai_api_key or ("lm-studio" if settings.openai_base_url else "")
     llm = ChatOpenAI(
-        model=settings.executor_model or "gpt-4o-mini",
+        model=model_name,
         api_key=api_key,
         base_url=settings.openai_base_url or None,
         temperature=0.3,

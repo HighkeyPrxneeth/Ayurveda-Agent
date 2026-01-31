@@ -97,9 +97,10 @@ If unsafe, respond with: "REJECTED: [specific issue] | CORRECTION: [what to fix]
 def get_planner_llm():
     """High-intelligence model for planning (GPT-4o)."""
     settings = get_settings()
+    model_name = settings.per_planner_model or settings.planner_model
     api_key = settings.openai_api_key or ("lm-studio" if settings.openai_base_url else "")
     return ChatOpenAI(
-        model=settings.planner_model,
+        model=model_name,
         api_key=api_key,
         base_url=settings.openai_base_url or None,
         temperature=0.3,  # Lower temperature for consistent planning
@@ -112,8 +113,9 @@ def get_executor_llm():
     settings = get_settings()
     # If Groq key available, use Llama; otherwise fall back to OpenAI
     if settings.groq_api_key:
+        model_name = settings.per_executor_model or settings.executor_model
         return ChatGroq(
-            model=settings.executor_model,
+            model=model_name,
             api_key=settings.groq_api_key,
             temperature=0.2,
             timeout=60
@@ -129,9 +131,32 @@ def get_executor_llm():
     )
 
 
+def get_synthesizer_llm():
+    """Model for synthesis in the PER workflow."""
+    settings = get_settings()
+    model_name = settings.per_synthesizer_model or settings.planner_model
+    api_key = settings.openai_api_key or ("lm-studio" if settings.openai_base_url else "")
+    return ChatOpenAI(
+        model=model_name,
+        api_key=api_key,
+        base_url=settings.openai_base_url or None,
+        temperature=0.3,
+        timeout=60
+    )
+
+
 def get_reviewer_llm():
     """Reviewer uses planner model for thorough safety checks."""
-    return get_planner_llm()
+    settings = get_settings()
+    model_name = settings.per_reviewer_model or settings.planner_model
+    api_key = settings.openai_api_key or ("lm-studio" if settings.openai_base_url else "")
+    return ChatOpenAI(
+        model=model_name,
+        api_key=api_key,
+        base_url=settings.openai_base_url or None,
+        temperature=0.3,
+        timeout=60
+    )
 
 
 # === NODE FUNCTIONS ===
@@ -231,7 +256,7 @@ def should_continue_execution(state: AgentState) -> str:
 
 def synthesize_node(state: AgentState) -> dict:
     """Compile all step results into a coherent response."""
-    llm = get_planner_llm()
+    llm = get_synthesizer_llm()
     
     executed_summary = "\n".join([
         f"Step: {step}\nResult: {result}"

@@ -20,7 +20,7 @@ import json
 from .config import get_settings, Settings
 from .models import DoshaScore, PrakritiAssessment, TreatmentPlan
 from .services import DoshaCalculator, get_dosha_calculator, PRAKRITI_QUESTIONS
-from .agents import generate_treatment_plan, process_query
+from .agents import generate_treatment_plan, process_query, process_debate_query
 
 
 # === Application Setup ===
@@ -117,6 +117,41 @@ class ChatResponse(BaseModel):
     guardrail_violations: list[dict]
     workers_consulted: int
     disclaimer: str = "This is for educational/wellness purposes only. Not a medical diagnosis."
+
+
+class DebateRequest(BaseModel):
+    """Input for the multi-agent debate protocol."""
+    message: str = Field(..., min_length=1, description="User's wellness question")
+    user_id: Optional[str] = Field(None, description="User identifier for context tracking")
+    dosha_scores: Optional[dict[str, float]] = Field(None, description="Known Dosha scores")
+    health_conditions: list[str] = Field(default_factory=list, description="Known health conditions - critical for biomedical review")
+    conversation_history: list[ConversationMessage] = Field(default_factory=list, description="Previous conversation messages")
+
+
+class DebateResponse(BaseModel):
+    """Response from the Multi-Agent Debate Protocol."""
+    response: str
+    mode: str = "debate"
+    
+    # Debate components (for transparency)
+    ayurveda_proposal: str
+    biomedical_critique: str
+    ayurveda_revision: str
+    
+    # Risk assessment
+    risk_map: dict
+    overall_risk_level: str
+    
+    # Scores
+    debate_scores: dict
+    final_score: float
+    recommendation_tier: str
+    
+    # Safety
+    guardrail_passed: bool
+    guardrail_violations: list[dict]
+    
+    disclaimer: str = "This is for educational/wellness purposes only. Not a medical diagnosis. The debate protocol provides multiple perspectives but does not replace professional medical advice."
 
 
 # === Health Check ===
@@ -406,6 +441,177 @@ async def chat_stream(request: ChatRequest):
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
 
 
+# === Multi-Agent Debate Protocol Endpoints ===
+
+@app.post("/api/v1/chat/debate", response_model=DebateResponse)
+async def chat_debate(request: DebateRequest):
+    """
+    Multi-Agent Debate Protocol endpoint.
+    
+    This endpoint provides a more rigorous review process where:
+    
+    **Debate Flow:**
+    1. **Ayurveda Expert** (with RAG): Generates initial recommendations
+       based on Dosha profile, health history, and Ayurvedic principles
+    2. **Biomedical Expert** (no RAG): Critiques from evidence-based perspective,
+       flags safety concerns and unsupported claims
+    3. **Ayurveda Revision**: Integrates valid biomedical concerns while
+       maintaining appropriate traditional practices
+    4. **Risk Mapper**: Deterministic contraindication checks against known conditions
+    5. **Orchestration Scorer**: Scores the debate quality on evidence, safety,
+       integration, and practicality
+    
+    **Key Differences from /api/v1/chat:**
+    - More thorough review process (takes longer)
+    - Provides transparency into the debate (shows all perspectives)
+    - Includes quantitative scoring
+    - Better for complex health queries or users with multiple conditions
+    
+    **When to Use:**
+    - User has multiple health conditions
+    - Query involves herbs or supplements
+    - User wants to understand both Ayurvedic and biomedical perspectives
+    - Higher-stakes wellness decisions
+    """
+    settings = get_settings()
+    
+    if not settings.openai_api_key and not settings.openai_base_url:
+        raise HTTPException(
+            status_code=503,
+            detail="API key not configured. Set OPENAI_API_KEY or OPENAI_BASE_URL."
+        )
+    
+    user_id = request.user_id or str(uuid.uuid4())
+    dosha_profile = request.dosha_scores or {
+        "vata": 0.33,
+        "pitta": 0.33,
+        "kapha": 0.34
+    }
+    
+    # Convert conversation history
+    from langchain_core.messages import HumanMessage, AIMessage
+    messages = []
+    for msg in request.conversation_history:
+        if msg.role == 'user':
+            messages.append(HumanMessage(content=msg.content))
+        elif msg.role == 'assistant':
+            messages.append(AIMessage(content=msg.content))
+    
+    try:
+        result = await process_debate_query(
+            user_id=user_id,
+            query=request.message,
+            dosha_profile=dosha_profile,
+            health_conditions=request.health_conditions,
+            messages=messages
+        )
+        
+        return DebateResponse(
+            response=result["response"],
+            mode=result["mode"],
+            ayurveda_proposal=result["ayurveda_proposal"],
+            biomedical_critique=result["biomedical_critique"],
+            ayurveda_revision=result["ayurveda_revision"],
+            risk_map=result["risk_map"],
+            overall_risk_level=result["overall_risk_level"],
+            debate_scores=result["debate_scores"],
+            final_score=result["final_score"],
+            recommendation_tier=result["recommendation_tier"],
+            guardrail_passed=result["guardrail_passed"],
+            guardrail_violations=result["guardrail_violations"]
+        )
+        
+    except Exception as e:
+        logger.exception("Error processing debate request")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing debate: {str(e)}"
+        )
+
+
+@app.post("/api/v1/chat/debate/stream")
+async def chat_debate_stream(request: DebateRequest):
+    """
+    Streaming version of the Multi-Agent Debate Protocol.
+    
+    Emits SSE events for each stage of the debate:
+    - status: { stage: "context" | "ayurveda_proposal" | "biomedical_critique" | 
+                "ayurveda_revision" | "risk_mapping" | "scoring" | "assembling" | "guardrail",
+                detail: optional string }
+    - delta: { text: chunk } - for final response streaming
+    - done: DebateResponse - complete result
+    - error: { message: string }
+    """
+    settings = get_settings()
+    
+    if not settings.openai_api_key and not settings.openai_base_url:
+        raise HTTPException(
+            status_code=503,
+            detail="API key not configured. Set OPENAI_API_KEY or OPENAI_BASE_URL."
+        )
+    
+    user_id = request.user_id or str(uuid.uuid4())
+    dosha_profile = request.dosha_scores or {
+        "vata": 0.33,
+        "pitta": 0.33,
+        "kapha": 0.34
+    }
+    
+    queue: asyncio.Queue[Optional[dict]] = asyncio.Queue()
+    
+    async def progress_callback(stage: str, detail: Optional[str] = None):
+        await queue.put({"event": "status", "data": {"stage": stage, "detail": detail}})
+    
+    from langchain_core.messages import HumanMessage, AIMessage
+    messages = []
+    for msg in request.conversation_history:
+        if msg.role == 'user':
+            messages.append(HumanMessage(content=msg.content))
+        elif msg.role == 'assistant':
+            messages.append(AIMessage(content=msg.content))
+    
+    async def run_debate_pipeline():
+        try:
+            result = await process_debate_query(
+                user_id=user_id,
+                query=request.message,
+                dosha_profile=dosha_profile,
+                health_conditions=request.health_conditions,
+                messages=messages,
+                progress_callback=progress_callback
+            )
+            
+            await queue.put({"event": "status", "data": {"stage": "response", "detail": None}})
+            response_text = result.get("response", "")
+            for chunk in chunk_text(response_text):
+                await queue.put({"event": "delta", "data": {"text": chunk}})
+                await asyncio.sleep(0)
+            
+            await queue.put({"event": "done", "data": result})
+        except Exception as e:
+            logger.exception("Error processing debate stream")
+            await queue.put({"event": "error", "data": {"message": str(e)}})
+        finally:
+            await queue.put(None)
+    
+    asyncio.create_task(run_debate_pipeline())
+    
+    async def event_generator() -> AsyncIterator[str]:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield f"event: {item['event']}\ndata: {json.dumps(item['data'])}\n\n"
+    
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
+
+
 # === Startup Event ===
 
 @app.on_event("startup")
@@ -413,11 +619,23 @@ async def startup_event():
     """Initialize services on startup."""
     settings = get_settings()
     print(f"🌿 {settings.app_name} API starting...")
-    print(f"   Architecture: Hierarchical Clinical Council")
+    print(f"   Architecture: Hierarchical Clinical Council + Debate Protocol")
     print(f"   Planner Model: {settings.planner_model}")
     print(f"   Executor Model: {settings.executor_model}")
+    print("   Task Models:")
+    print(f"     - Council Supervisor: {settings.council_supervisor_model or settings.planner_model}")
+    print(f"     - Council Aggregator: {settings.council_aggregator_model or settings.executor_model}")
+    print(f"     - Workers Specialist: {settings.workers_specialist_model or settings.planner_model}")
+    print(f"     - Workers Fast (Groq): {settings.workers_fast_model or 'meta-llama/llama-4-scout-17b-16e-instruct'}")
+    print(f"     - PER Planner: {settings.per_planner_model or settings.planner_model}")
+    print(f"     - PER Executor: {settings.per_executor_model or settings.executor_model}")
+    print(f"     - PER Synthesizer: {settings.per_synthesizer_model or settings.planner_model}")
+    print(f"     - PER Reviewer: {settings.per_reviewer_model or settings.planner_model}")
+    print(f"     - Debate Revision: {settings.debate_revision_model or settings.planner_model}")
+    print(f"     - Debate Scoring: {settings.debate_scoring_model or settings.planner_model}")
     print(f"   Endpoints:")
     print(f"     - POST /api/v1/chat (Clinical Council)")
+    print(f"     - POST /api/v1/chat/debate (Multi-Agent Debate)")
     print(f"     - POST /api/v1/generate-plan (Legacy PER)")
     
     if not settings.openai_api_key:

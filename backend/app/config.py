@@ -17,6 +17,18 @@ class Settings(BaseSettings):
     # Model Configuration
     planner_model: str = "mistralai/ministral-3-3b"  # High-intelligence for planning
     executor_model: str = "mistralai/ministral-3-3b"  # Cost-effective for execution
+
+    # Task-Specific Models (optional; fall back to planner/executor models)
+    council_supervisor_model: str = ""
+    council_aggregator_model: str = ""
+    workers_specialist_model: str = ""
+    workers_fast_model: str = ""
+    per_planner_model: str = ""
+    per_executor_model: str = ""
+    per_synthesizer_model: str = ""
+    per_reviewer_model: str = ""
+    debate_revision_model: str = ""
+    debate_scoring_model: str = ""
     
     # Application
     app_name: str = "Ayush Habba"

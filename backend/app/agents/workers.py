@@ -7,6 +7,7 @@ Workers handle specific domains:
 - DiagnosticsAgent: Symptom analysis and wellness mapping
 - PharmacistAgent: Herb safety, drug interactions, contraindications
 - DietCoach: Diet and lifestyle recommendations
+- BiomedicalCritic: Evidence-based biomedical critique (no RAG access)
 
 Workers return control to the Supervisor after completing their task.
 """
@@ -46,8 +47,9 @@ def get_fast_llm():
     logger.debug("Initializing fast LLM")
     if settings.groq_api_key:
         logger.info("Using Groq fast LLM")
+        model_name = settings.workers_fast_model or "meta-llama/llama-4-scout-17b-16e-instruct"
         return ChatGroq(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",  # Fast 8B model
+            model=model_name,  # Fast model on Groq
             api_key=settings.groq_api_key,
             temperature=0.3,
             timeout=30
@@ -68,9 +70,10 @@ def get_specialist_llm():
     """High-quality model for specialist reasoning."""
     settings = get_settings()
     logger.debug("Initializing specialist LLM")
+    model_name = settings.workers_specialist_model or settings.planner_model
     api_key = settings.openai_api_key or ("lm-studio" if settings.openai_base_url else "")
     return ChatOpenAI(
-        model=settings.planner_model,
+        model=model_name,
         api_key=api_key,
         base_url=settings.openai_base_url or None,
         temperature=0.4,
@@ -594,6 +597,107 @@ class DietCoach:
             }
 
 
+# === Worker Agent: Biomedical Critic (Debate Protocol) ===
+
+BIOMEDICAL_CRITIC_SYSTEM = """You are a Biomedical Expert providing evidence-based critique of Ayurvedic recommendations.
+
+Your role is to act as a critical reviewer from a modern biomedical perspective:
+1. Identify claims that lack scientific evidence or clinical validation
+2. Flag potential safety concerns based on pharmacology and toxicology
+3. Note drug-herb interactions and contraindications
+4. Point out where Ayurvedic claims conflict with established medical knowledge
+5. Highlight recommendations that could delay proper medical treatment
+
+USER'S MEDICAL CONTEXT:
+- Known Health Conditions: {health_conditions}
+- Current Medications: {medications}
+
+AYURVEDIC PROPOSAL TO CRITIQUE:
+{ayurveda_proposal}
+
+CRITIQUE FRAMEWORK:
+1. **Evidence Assessment**: Rate the scientific support for each recommendation (Strong/Moderate/Weak/None)
+2. **Safety Concerns**: List any pharmacological or toxicological risks
+3. **Contraindication Check**: Flag interactions with user's conditions/medications
+4. **Alternative Perspective**: Suggest evidence-based alternatives where applicable
+5. **Risk Level**: Overall risk assessment (Low/Moderate/High/Critical)
+
+IMPORTANT RULES:
+- Be constructive but firm - patient safety is paramount
+- Cite evidence levels (RCT, observational, traditional use only, etc.)
+- Do NOT dismiss traditional medicine entirely - identify what is safe vs. risky
+- Focus critique on the SPECIFIC recommendations, not Ayurveda in general
+- If a recommendation is generally safe, acknowledge it
+
+Output your critique in a structured format with clear sections."""
+
+
+class BiomedicalCritic:
+    """
+    Biomedical expert for debate protocol.
+    
+    Provides evidence-based critique of Ayurvedic recommendations.
+    Has access to user's health conditions but NO RAG/historical context.
+    This ensures an unbiased biomedical perspective.
+    """
+    
+    def __init__(self):
+        logger.debug("Initializing BiomedicalCritic")
+        self.llm = get_specialist_llm()
+    
+    async def process(self, state: WorkerState, ayurveda_proposal: str = "") -> dict:
+        """
+        Critique an Ayurvedic proposal from a biomedical perspective.
+        
+        Args:
+            state: Worker state with health_conditions (required)
+            ayurveda_proposal: The Ayurvedic recommendation to critique
+            
+        Note: This worker intentionally has NO access to:
+        - context_from_graph (GraphRAG)
+        - Ayurvedic tools
+        This ensures an unbiased biomedical critique.
+        """
+        logger.info("BiomedicalCritic processing started")
+        
+        # Extract medications from health conditions if mentioned
+        medications = [c for c in state.get("health_conditions", []) 
+                      if any(med_kw in c.lower() for med_kw in 
+                            ["medication", "taking", "prescribed", "drug"])]
+        conditions = [c for c in state.get("health_conditions", []) 
+                     if c not in medications]
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", BIOMEDICAL_CRITIC_SYSTEM),
+            ("human", "Please provide your biomedical critique of the above Ayurvedic proposal.")
+        ])
+        
+        chain = prompt | self.llm
+        
+        try:
+            logger.debug("BiomedicalCritic invoking LLM chain")
+            response = await chain.ainvoke({
+                "health_conditions": conditions or ["None specified"],
+                "medications": medications or ["None specified"],
+                "ayurveda_proposal": ayurveda_proposal or "No proposal provided"
+            })
+            
+            output = response.content
+            
+            logger.info("BiomedicalCritic processing completed")
+            return {
+                "worker_output": output,
+                "needs_followup": False
+            }
+            
+        except Exception as e:
+            logger.exception("BiomedicalCritic processing failed")
+            return {
+                "worker_output": f"Unable to complete biomedical review. Error: {str(e)}",
+                "needs_followup": True
+            }
+
+
 # === Worker Factory ===
 
 def get_worker(worker_type: str):
@@ -611,6 +715,7 @@ def get_worker(worker_type: str):
         "pharmacist": PharmacistAgent,
         "diagnostics": DiagnosticsAgent,
         "diet": DietCoach,
+        "biomedical": BiomedicalCritic,
     }
     
     logger.info("Selecting worker type: %s", worker_type)

@@ -23,6 +23,7 @@ from .workers import (
     PharmacistAgent,
     DiagnosticsAgent,
     DietCoach,
+    BiomedicalCritic,
     fast_responder,
     get_worker
 )
@@ -30,6 +31,16 @@ from .graph_memory import (
     HealthGraphRAG,
     get_health_graph_rag,
     init_user_in_graph
+)
+
+# Multi-Agent Debate Protocol
+from .debate_council import (
+    process_debate_query,
+    create_debate_council,
+    DebateState,
+    DebateScores,
+    RiskMap,
+    RiskLevel
 )
 
 __all__ = [
@@ -63,6 +74,7 @@ __all__ = [
     "PharmacistAgent",
     "DiagnosticsAgent", 
     "DietCoach",
+    "BiomedicalCritic",
     "fast_responder",
     "get_worker",
     
@@ -70,4 +82,12 @@ __all__ = [
     "HealthGraphRAG",
     "get_health_graph_rag",
     "init_user_in_graph",
+    
+    # Debate Protocol
+    "process_debate_query",
+    "create_debate_council",
+    "DebateState",
+    "DebateScores",
+    "RiskMap",
+    "RiskLevel",
 ]
