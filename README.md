@@ -21,23 +21,23 @@ A full-stack application combining deterministic Ayurvedic rules (Symbolic AI) w
 │                        FastAPI Backend                           │
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │                   API Layer (main.py)                        ││
-│  │  /assess-dosha  │  /assess-vitals  │  /generate-plan        ││
+│  │  /chat        │  /chat/debate  │  /generate-plan            ││
 │  └─────────────────────────────────────────────────────────────┘│
 │                              │                                   │
 │         ┌────────────────────┼────────────────────┐             │
 │         ▼                    ▼                    ▼             │
 │  ┌─────────────┐    ┌─────────────────┐   ┌───────────────┐    │
-│  │ SYMBOLIC AI │    │  NEURO-SYMBOLIC │   │    TOOLS      │    │
-│  │ DoshaCalc   │◄───│  PER Agent      │──►│ Contraind.    │    │
-│  │ (Rules)     │    │  (LangGraph)    │   │ Diet Lookup   │    │
+│  │ SEMANTIC    │    │    CLINICAL     │   │     IRON      │    │
+│  │ ROUTER      │───►│    COUNCIL      │──►│     DOME      │    │
+│  │ (Fast path) │    │  (Supervised)   │   │  (Guardrails) │    │
 │  └─────────────┘    └─────────────────┘   └───────────────┘    │
 │                              │                                   │
 │                  ┌───────────┴───────────┐                      │
 │                  ▼                       ▼                      │
 │         ┌─────────────┐         ┌─────────────┐                 │
-│         │  PLANNER    │         │  EXECUTOR   │                 │
-│         │  GPT-4o     │         │  Llama-3-70B│                 │
-│         │  (OpenAI)   │         │  (Groq)     │                 │
+│         │ SPECIALISTS │         │ FAST RESP.  │                 │
+│         │ Ayurveda,   │         │ Llama-3-8B  │                 │
+│         │ Pharm, etc. │         │ (Groq)      │                 │
 │         └─────────────┘         └─────────────┘                 │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -49,9 +49,24 @@ A full-stack application combining deterministic Ayurvedic rules (Symbolic AI) w
 | **Frontend** | Next.js 14 + Tailwind | SSR, Responsive UI, Dosha visualization |
 | **API** | FastAPI | High-performance async endpoints |
 | **Symbolic AI** | Python (DoshaCalculator) | Deterministic Prakriti scoring |
-| **Neural AI** | LangGraph + LangChain | Planner-Executor-Reviewer agents |
+| **Clinical Council** | LangGraph (Hierarchical) | supervisor-led specialist orchestration |
+| **Debate Protocol** | Multi-Agent Debate | Ayurveda vs Biomedical safety critique |
 | **Planner LLM** | GPT-4o (OpenAI) | Complex reasoning, plan creation |
 | **Executor LLM** | Llama-3.3-70B (Groq) | Cost-effective tool execution |
+
+---
+
+## Orchestration Modes
+
+### 1. Hierarchical Clinical Council
+Uses a **Semantic Router** to classify intent, routing simple queries to a **Fast Responder** and complex medical queries to a **Clinical Supervisor**. The Supervisor delegates to specialized workers:
+- **Ayurveda Specialist**: Dosha analysis & constitution guidance.
+- **Pharmacist**: Herb safety & drug interactions.
+- **Diagnostics**: Symptom pattern recognition.
+- **Diet Coach**: Nutrition & lifestyle optimization.
+
+### 2. Multi-Agent Debate Protocol
+For high-stakes queries, an **Ayurveda Expert** and **Biomedical Critic** engage in a structured debate. RAG-enhanced Ayurvedic wisdom is critiqued against modern biomedical evidence, followed by deterministic risk mapping and scoring.
 
 ---
 
@@ -120,11 +135,15 @@ npm run dev
 | `/api/v1/assess-dosha` | POST | Calculate Prakriti from answers |
 | `/api/v1/assess-vitals` | POST | Infer Dosha from physiological vitals |
 
-### Neuro-Symbolic Agent
+### Agentic AI (Clinical Council & Debate)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/generate-plan` | POST | Generate personalized treatment plan |
+| `/api/v1/chat` | POST | Clinical Council workflow (Standard) |
+| `/api/v1/chat/stream` | POST | Streaming Clinical Council response |
+| `/api/v1/chat/debate` | POST | Multi-Agent Debate Protocol (Rigorous) |
+| `/api/v1/chat/debate/stream` | POST | Streaming Debate Protocol response |
+| `/api/v1/generate-plan` | POST | Legacy PER workflow for treatment planning |
 
 ---
 
@@ -134,12 +153,16 @@ npm run dev
 Ayush Habba/
 ├── backend/
 │   ├── app/
-│   │   ├── agents/           # LangGraph PER workflow
-│   │   │   ├── per_workflow.py
-│   │   │   └── tools.py
+│   │   ├── agents/           # Orchestration Layers
+│   │   │   ├── council.py        # Clinical Council supervisor
+│   │   │   ├── debate_council.py # Multi-agent debate protocol
+│   │   │   ├── per_workflow.py   # Legacy PER agent
+│   │   │   ├── workers.py        # Specialist worker agents
+│   │   │   ├── semantic_router.py# Intent classification
+│   │   │   ├── guardrails.py     # Iron Dome safety layer
+│   │   │   ├── graph_memory.py   # GraphRAG integration
+│   │   │   └── tools.py          # Clinical tools
 │   │   ├── models/           # Pydantic data models
-│   │   │   ├── dosha.py
-│   │   │   └── treatment.py
 │   │   ├── services/         # Business logic
 │   │   │   ├── dosha_calculator.py
 │   │   │   └── question_bank.py
@@ -221,6 +244,17 @@ The architecture implements **70-90% cost reduction** by using:
 
 If Groq API key is not provided, the system falls back to `gpt-4o-mini`.
 
+## Task-Specific Configuration
+
+You can now configure models for each orchestration task separately in `.env`:
+- `COUNCIL_SUPERVISOR_MODEL`: Routing in clinical council.
+- `COUNCIL_AGGREGATOR_MODEL`: Synthesis in clinical council.
+- `WORKERS_SPECIALIST_MODEL`: Reasoning for specialist agents.
+- `DEBATE_REVISION_MODEL`: Model used for Ayurvedic revision in debate.
+- `DEBATE_SCORING_MODEL`: Model used for clinical scoring.
+
+All task-specific variables will fallback to `PLANNER_MODEL` or `EXECUTOR_MODEL` if left blank.
+
 ## Local LLM Prototyping (LM Studio)
 
 1. Launch LM Studio and start the OpenAI-compatible server.
@@ -235,7 +269,8 @@ Note: If LM Studio requires an API key, set `OPENAI_API_KEY` to any non-empty st
 ## Safety & Compliance
 
 - ✅ **Contraindication Database**: Hard-coded safety checks for herb-condition interactions
-- ✅ **Reviewer Agent**: All recommendations pass through safety validation
+- ✅ **Iron Dome Guardrails**: All outputs pass through regex-based and deterministic safety filters
+- ✅ **Multi-Agent Debate**: Rigorous cross-examination between Ayurvedic and Biomedical experts
 - ✅ **Source Traceability**: Every recommendation cites its source text
 - ✅ **Legal Disclaimer**: Application clearly states "wellness/educational" purpose
 
