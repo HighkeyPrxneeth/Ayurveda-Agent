@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { DoshaBars } from '@/components/DoshaBars';
 import { ChatInterface } from '@/components/ChatInterface';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { DoshaTrendChart } from '@/components/DoshaTrendChart';
 import { AssessmentResponse } from '@/lib/api';
 
 export default function DashboardPage() {
@@ -148,7 +150,7 @@ export default function DashboardPage() {
             </section>
 
             {/* Quick Info Card */}
-            <section 
+            <section
               className="bg-white dark:bg-gray-900 rounded-2xl shadow-lg p-4 sm:p-6 transition-all hover:shadow-xl"
               aria-labelledby="dosha-info-title"
             >
@@ -170,6 +172,9 @@ export default function DashboardPage() {
                 </div>
               </dl>
             </section>
+
+            {/* Dosha Trend Chart */}
+            <DoshaTrendChart userId="default-user" />
           </aside>
 
           {/* Right Column - Chat */}
@@ -177,7 +182,9 @@ export default function DashboardPage() {
             className="lg:col-span-2"
             style={chatHeight ? { height: `${chatHeight}px` } : undefined}
           >
-            <ChatInterface doshaScores={assessment?.scores} />
+            <ErrorBoundary>
+              <ChatInterface doshaScores={assessment?.scores} />
+            </ErrorBoundary>
           </div>
         </div>
 

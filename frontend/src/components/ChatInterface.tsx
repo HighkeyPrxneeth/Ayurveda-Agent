@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useRef, useEffect, useId } from 'react';
+import { useState, useRef, useEffect, useId, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { Copy, Edit2, RotateCw, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { Copy, Edit2, RotateCw, ThumbsDown, ThumbsUp, Download, Trash2 } from 'lucide-react';
 import { DoshaScore, chatWithCouncil, streamChatWithCouncil } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -16,6 +16,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   liked?: boolean | null;
+  timestamp?: string;
   metadata?: {
     route?: string;
     workers_consulted?: number;
@@ -23,28 +24,149 @@ interface Message {
   };
 }
 
+// Storage key for chat persistence
+const CHAT_STORAGE_KEY = 'ayurveda_chat_history';
+const HEALTH_CONDITIONS_KEY = 'ayurveda_health_conditions';
+
 export function ChatInterface({ doshaScores }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content:
-        "Namaste! 🙏 I'm your Ayurvedic wellness assistant. Ask me about diet recommendations, lifestyle practices, or how to balance your Doshas. I use a multi-step reasoning process to provide safe, personalized guidance.",
-    },
-  ]);
+  const defaultMessage: Message = {
+    role: 'assistant',
+    content:
+      "Namaste! 🙏 I'm your Ayurvedic wellness assistant. Ask me about diet recommendations, lifestyle practices, or how to balance your Doshas. I use a multi-step reasoning process to provide safe, personalized guidance.",
+    timestamp: new Date().toISOString(),
+  };
+
+  const [messages, setMessages] = useState<Message[]>([defaultMessage]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [healthConditions, setHealthConditions] = useState<string[]>([]);
   const [conditionInput, setConditionInput] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [loadingStatus, setLoadingStatus] = useState('Thinking...');
+  const [isInitialized, setIsInitialized] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const chatId = useId();
+
+  // Load persisted data on mount
+  useEffect(() => {
+    try {
+      const storedMessages = localStorage.getItem(CHAT_STORAGE_KEY);
+      if (storedMessages) {
+        const parsed = JSON.parse(storedMessages);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+        }
+      }
+      const storedConditions = localStorage.getItem(HEALTH_CONDITIONS_KEY);
+      if (storedConditions) {
+        const parsed = JSON.parse(storedConditions);
+        if (Array.isArray(parsed)) {
+          setHealthConditions(parsed);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load chat history:', error);
+    }
+    setIsInitialized(true);
+  }, []);
+
+  // Persist messages when they change
+  useEffect(() => {
+    if (!isInitialized) return;
+    try {
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+    } catch (error) {
+      console.error('Failed to save chat history:', error);
+    }
+  }, [messages, isInitialized]);
+
+  // Persist health conditions when they change
+  useEffect(() => {
+    if (!isInitialized) return;
+    try {
+      localStorage.setItem(HEALTH_CONDITIONS_KEY, JSON.stringify(healthConditions));
+    } catch (error) {
+      console.error('Failed to save health conditions:', error);
+    }
+  }, [healthConditions, isInitialized]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
+
+  // Export chat history functions
+  const exportAsJSON = useCallback(() => {
+    const exportData = {
+      exportDate: new Date().toISOString(),
+      doshaScores,
+      healthConditions,
+      messages: messages.map(m => ({
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp,
+        liked: m.liked,
+        metadata: m.metadata,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ayurveda-chat-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [messages, doshaScores, healthConditions]);
+
+  const exportAsMarkdown = useCallback(() => {
+    const lines: string[] = [
+      '# Ayurveda Chat Export',
+      '',
+      `**Date:** ${new Date().toLocaleDateString()}`,
+      '',
+    ];
+    if (doshaScores) {
+      lines.push('## Dosha Profile');
+      lines.push(`- **Vata:** ${Math.round(doshaScores.vata * 100)}%`);
+      lines.push(`- **Pitta:** ${Math.round(doshaScores.pitta * 100)}%`);
+      lines.push(`- **Kapha:** ${Math.round(doshaScores.kapha * 100)}%`);
+      lines.push('');
+    }
+    if (healthConditions.length > 0) {
+      lines.push('## Health Conditions');
+      healthConditions.forEach(c => lines.push(`- ${c}`));
+      lines.push('');
+    }
+    lines.push('## Conversation');
+    lines.push('');
+    messages.forEach(m => {
+      const role = m.role === 'user' ? '**You**' : '**Assistant**';
+      lines.push(`### ${role}`);
+      if (m.timestamp) {
+        lines.push(`*${new Date(m.timestamp).toLocaleString()}*`);
+      }
+      lines.push('');
+      lines.push(m.content);
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ayurveda-chat-${new Date().toISOString().split('T')[0]}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [messages, doshaScores, healthConditions]);
+
+  const clearHistory = useCallback(() => {
+    if (window.confirm('Are you sure you want to clear all chat history?')) {
+      setMessages([defaultMessage]);
+      localStorage.removeItem(CHAT_STORAGE_KEY);
+    }
+  }, []);
 
   const getStatusLabel = (stage: string, detail?: string | null) => {
     switch (stage) {
@@ -95,13 +217,13 @@ export function ChatInterface({ doshaScores }: ChatInterfaceProps) {
       const next = [...prev];
 
       if (options?.mode === 'new') {
-        next.push({ role: 'user', content: userMessage });
+        next.push({ role: 'user', content: userMessage, timestamp: new Date().toISOString() });
       }
 
       if (options?.mode === 'edit' && options.editIndex !== undefined) {
         const target = next[options.editIndex];
         if (target) {
-          next[options.editIndex] = { ...target, content: userMessage };
+          next[options.editIndex] = { ...target, content: userMessage, timestamp: new Date().toISOString() };
           if (next[options.editIndex + 1]?.role === 'assistant') {
             next.splice(options.editIndex + 1, 1);
           }
@@ -155,6 +277,7 @@ export function ChatInterface({ doshaScores }: ChatInterfaceProps) {
         next.push({
           role: 'assistant',
           content: cleanedResponse,
+          timestamp: new Date().toISOString(),
           metadata: {
             route: result.route,
             workers_consulted: result.workers_consulted,
@@ -172,6 +295,7 @@ export function ChatInterface({ doshaScores }: ChatInterfaceProps) {
         next.push({
           role: 'assistant',
           content: `Sorry, I encountered an error: ${e instanceof Error ? e.message : 'Unknown error'}. Please ensure the backend is running and API keys are configured.`,
+          timestamp: new Date().toISOString(),
         });
         return next;
       });
@@ -253,16 +377,59 @@ export function ChatInterface({ doshaScores }: ChatInterfaceProps) {
   };
 
   return (
-    <section 
+    <section
       className="bg-white dark:bg-gray-900 rounded-2xl shadow-lg flex flex-col h-full animate-fade-in-up"
       aria-labelledby={`${chatId}-title`}
     >
       {/* Header */}
       <header className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-800">
-        <h2 id={`${chatId}-title`} className="font-semibold text-gray-800 dark:text-gray-100">
-          Wellness Assistant
-        </h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400">Powered by Hierarchical Clinical Council</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 id={`${chatId}-title`} className="font-semibold text-gray-800 dark:text-gray-100">
+              Wellness Assistant
+            </h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Powered by Hierarchical Clinical Council</p>
+          </div>
+
+          {/* Export and Clear buttons */}
+          <div className="flex gap-1">
+            <div className="relative group">
+              <button
+                type="button"
+                className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-ayurveda-gold"
+                aria-label="Export chat"
+                aria-haspopup="true"
+              >
+                <Download className="h-4 w-4" />
+              </button>
+              <div className="absolute right-0 mt-1 w-32 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                <button
+                  type="button"
+                  onClick={exportAsJSON}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-t-lg"
+                >
+                  Export JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={exportAsMarkdown}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-b-lg"
+                >
+                  Export Markdown
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={clearHistory}
+              className="p-2 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-ayurveda-gold"
+              aria-label="Clear chat history"
+              title="Clear chat history"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
 
         {/* Health Conditions */}
         <div className="mt-3">

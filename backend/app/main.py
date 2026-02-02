@@ -19,7 +19,7 @@ import json
 
 from .config import get_settings, Settings
 from .models import DoshaScore, PrakritiAssessment, TreatmentPlan
-from .services import DoshaCalculator, get_dosha_calculator, PRAKRITI_QUESTIONS
+from .services import DoshaCalculator, get_dosha_calculator, PRAKRITI_QUESTIONS, get_response_cache, get_dosha_tracker
 from .agents import generate_treatment_plan, process_query, process_debate_query
 
 
@@ -283,44 +283,61 @@ async def generate_treatment(request: TreatmentRequest):
 async def chat(request: ChatRequest):
     """
     Chat endpoint using the Hierarchical Clinical Council architecture.
-    
+
     This is the improved agentic system that replaces the PER workflow:
-    
+
     **Architecture:**
     1. Semantic Router classifies intent (<200ms latency)
     2. Simple queries → Fast Responder (Llama-3-8B)
     3. Complex queries → Supervisor → Specialist Workers → Aggregator
     4. All outputs → Iron Dome Guardrails (deterministic safety)
-    
+
     **Specialist Workers:**
     - Ayurveda Specialist: Dosha analysis, Prakriti/Vikriti assessment
     - Pharmacist: Herb safety, drug interactions, contraindications
     - Diagnostics: Symptom pattern recognition, wellness mapping
     - Diet Coach: Dietary advice, meal planning, lifestyle routines
-    
+
     **Safety:**
     - Content filtering for prompt injection
     - Deterministic guardrails (no LLM-based reviewer)
     - Emergency detection and instant handoff
+
+    **Performance:**
+    - Response caching for identical queries with same context
     """
     settings = get_settings()
-    
+
     if not settings.openai_api_key and not settings.openai_base_url:
         raise HTTPException(
             status_code=503,
             detail="API key not configured. Set OPENAI_API_KEY or OPENAI_BASE_URL."
         )
-    
+
     # Generate user_id if not provided
     user_id = request.user_id or str(uuid.uuid4())
-    
+
     # Use provided scores or default balanced
     dosha_profile = request.dosha_scores or {
         "vata": 0.33,
         "pitta": 0.33,
         "kapha": 0.34
     }
-    
+
+    # Build cache context (exclude conversation history for simpler caching)
+    cache_context = {
+        "dosha_scores": dosha_profile,
+        "health_conditions": sorted(request.health_conditions) if request.health_conditions else []
+    }
+
+    # Check cache first (only for queries without conversation history)
+    cache = get_response_cache()
+    if not request.conversation_history:
+        cached_result = cache.get(request.message, cache_context)
+        if cached_result:
+            logger.info("Cache hit for query: %s", request.message[:50])
+            return ChatResponse(**cached_result)
+
     # Convert conversation history to LangChain messages
     from langchain_core.messages import HumanMessage, AIMessage
     messages = []
@@ -329,7 +346,7 @@ async def chat(request: ChatRequest):
             messages.append(HumanMessage(content=msg.content))
         elif msg.role == 'assistant':
             messages.append(AIMessage(content=msg.content))
-    
+
     try:
         result = await process_query(
             user_id=user_id,
@@ -338,14 +355,21 @@ async def chat(request: ChatRequest):
             health_conditions=request.health_conditions,
             messages=messages
         )
-        
-        return ChatResponse(
-            response=result["response"],
-            route=result["route"],
-            guardrail_passed=result["guardrail_passed"],
-            guardrail_violations=result["guardrail_violations"],
-            workers_consulted=result["workers_consulted"]
-        )
+
+        response_data = {
+            "response": result["response"],
+            "route": result["route"],
+            "guardrail_passed": result["guardrail_passed"],
+            "guardrail_violations": result["guardrail_violations"],
+            "workers_consulted": result["workers_consulted"],
+            "disclaimer": "This is for educational/wellness purposes only. Not a medical diagnosis."
+        }
+
+        # Cache the result (only for queries without conversation history)
+        if not request.conversation_history:
+            cache.set(request.message, response_data, cache_context)
+
+        return ChatResponse(**response_data)
     except Exception as e:
         logger.exception("Error processing chat request")
         raise HTTPException(
@@ -612,6 +636,110 @@ async def chat_debate_stream(request: DebateRequest):
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
 
 
+# === Cache Management Endpoints ===
+
+@app.get("/api/v1/cache/stats")
+async def get_cache_stats():
+    """Get cache statistics for monitoring performance."""
+    cache = get_response_cache()
+    return cache.get_stats()
+
+
+@app.delete("/api/v1/cache")
+async def clear_cache():
+    """Clear all cached responses."""
+    cache = get_response_cache()
+    count = cache.clear()
+    return {"cleared": count, "message": f"Cleared {count} cached entries"}
+
+
+# === Dosha Trend Tracking Endpoints ===
+
+class DoshaTrackRequest(BaseModel):
+    """Request to track a Dosha assessment."""
+    user_id: str = Field(..., min_length=1, description="User identifier")
+    vata: float = Field(..., ge=0, le=1, description="Vata score (0-1)")
+    pitta: float = Field(..., ge=0, le=1, description="Pitta score (0-1)")
+    kapha: float = Field(..., ge=0, le=1, description="Kapha score (0-1)")
+    dominant_dosha: str = Field(..., description="Dominant Dosha type")
+    constitution_type: str = Field(..., description="Constitution type (e.g., Vata-Pitta)")
+    source: str = Field(default="questionnaire", description="Assessment source")
+
+
+class DoshaHistoryEntry(BaseModel):
+    """A single Dosha history entry."""
+    timestamp: str
+    vata: float
+    pitta: float
+    kapha: float
+    dominant_dosha: str
+    constitution_type: str
+    source: str
+
+
+class DoshaTrendResponse(BaseModel):
+    """Response containing Dosha trend data for visualization."""
+    labels: list[str]
+    vata: list[float]
+    pitta: list[float]
+    kapha: list[float]
+    dominant: list[str]
+    count: int
+
+
+@app.post("/api/v1/dosha/track", response_model=DoshaHistoryEntry)
+async def track_dosha_assessment(request: DoshaTrackRequest):
+    """
+    Track a Dosha assessment for trend analysis.
+
+    Stores the assessment with timestamp for historical tracking.
+    Use this endpoint after each Dosha assessment to build trend data.
+    """
+    tracker = get_dosha_tracker()
+    entry = tracker.track_assessment(
+        user_id=request.user_id,
+        vata=request.vata,
+        pitta=request.pitta,
+        kapha=request.kapha,
+        dominant_dosha=request.dominant_dosha,
+        constitution_type=request.constitution_type,
+        source=request.source
+    )
+    return DoshaHistoryEntry(**entry.to_dict())
+
+
+@app.get("/api/v1/dosha/history/{user_id}", response_model=list[DoshaHistoryEntry])
+async def get_dosha_history(user_id: str, limit: int = 30):
+    """
+    Get Dosha assessment history for a user.
+
+    Returns the most recent assessments, ordered newest first.
+    """
+    tracker = get_dosha_tracker()
+    entries = tracker.get_history(user_id, limit=limit)
+    return [DoshaHistoryEntry(**e.to_dict()) for e in entries]
+
+
+@app.get("/api/v1/dosha/trend/{user_id}", response_model=DoshaTrendResponse)
+async def get_dosha_trend(user_id: str, limit: int = 30):
+    """
+    Get Dosha trend data formatted for chart visualization.
+
+    Returns data suitable for line/area charts showing Dosha balance over time.
+    """
+    tracker = get_dosha_tracker()
+    trend_data = tracker.get_trend_data(user_id, limit=limit)
+    return DoshaTrendResponse(**trend_data)
+
+
+@app.delete("/api/v1/dosha/history/{user_id}")
+async def clear_dosha_history(user_id: str):
+    """Clear all Dosha history for a user."""
+    tracker = get_dosha_tracker()
+    count = tracker.clear_history(user_id)
+    return {"cleared": count, "message": f"Cleared {count} history entries for user {user_id}"}
+
+
 # === Startup Event ===
 
 @app.on_event("startup")
@@ -637,7 +765,9 @@ async def startup_event():
     print(f"     - POST /api/v1/chat (Clinical Council)")
     print(f"     - POST /api/v1/chat/debate (Multi-Agent Debate)")
     print(f"     - POST /api/v1/generate-plan (Legacy PER)")
-    
+    print(f"     - GET/DELETE /api/v1/cache/stats (Cache Management)")
+    print(f"     - POST/GET/DELETE /api/v1/dosha/* (Dosha Trend Tracking)")
+
     if not settings.openai_api_key:
         print("   ⚠️  OpenAI API key not set - agent endpoints will fail")
     if not settings.groq_api_key:
