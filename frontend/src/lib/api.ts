@@ -249,3 +249,89 @@ export async function streamChatWithCouncil(
     }
   }
 }
+
+// Dosha Trend Tracking Types and Functions
+
+export interface DoshaHistoryEntry {
+  timestamp: string;
+  vata: number;
+  pitta: number;
+  kapha: number;
+  dominant_dosha: string;
+  constitution_type: string;
+  source: string;
+}
+
+export interface DoshaTrendData {
+  labels: string[];
+  vata: number[];
+  pitta: number[];
+  kapha: number[];
+  dominant: string[];
+  count: number;
+}
+
+export interface DoshaTrackRequest {
+  user_id: string;
+  vata: number;
+  pitta: number;
+  kapha: number;
+  dominant_dosha: string;
+  constitution_type: string;
+  source?: string;
+}
+
+export async function trackDoshaAssessment(
+  request: DoshaTrackRequest
+): Promise<DoshaHistoryEntry> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/v1/dosha/track`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || 'Failed to track Dosha assessment');
+  }
+  return res.json();
+}
+
+export async function getDoshaHistory(
+  userId: string,
+  limit: number = 30
+): Promise<DoshaHistoryEntry[]> {
+  const res = await fetchWithTimeout(
+    `${API_BASE}/api/v1/dosha/history/${encodeURIComponent(userId)}?limit=${limit}`
+  );
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || 'Failed to fetch Dosha history');
+  }
+  return res.json();
+}
+
+export async function getDoshaTrend(
+  userId: string,
+  limit: number = 30
+): Promise<DoshaTrendData> {
+  const res = await fetchWithTimeout(
+    `${API_BASE}/api/v1/dosha/trend/${encodeURIComponent(userId)}?limit=${limit}`
+  );
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || 'Failed to fetch Dosha trend');
+  }
+  return res.json();
+}
+
+export async function clearDoshaHistory(userId: string): Promise<{ cleared: number; message: string }> {
+  const res = await fetchWithTimeout(
+    `${API_BASE}/api/v1/dosha/history/${encodeURIComponent(userId)}`,
+    { method: 'DELETE' }
+  );
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || 'Failed to clear Dosha history');
+  }
+  return res.json();
+}

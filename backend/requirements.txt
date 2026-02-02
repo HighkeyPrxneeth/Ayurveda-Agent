@@ -1,9 +1,9 @@
 # Core Framework
-fastapi==0.109.2
-uvicorn[standard]==0.27.1
-python-dotenv==1.0.1
-pydantic==2.6.1
-pydantic-settings==2.1.0
+fastapi>=0.109.2
+uvicorn[standard]>=0.27.1
+python-dotenv>=1.0.1
+pydantic>=2.7.4
+pydantic-settings>=2.1.0
 
 # AI & Agents (Updated for Hierarchical Clinical Council)
 langchain==0.3.15
